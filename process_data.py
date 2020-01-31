@@ -35,11 +35,9 @@ def vizualise(folder):
     for i in range(100, 950):
         image = imread(folder+'/pcd0{}r.png'.format(i))
         image_good, image_bad = np.copy(image), np.copy(image)
-
         f = open(folder+'/pcd0{}cpos.txt'.format(i))
         points = f.readlines()
         rectangles = process(points)
-        print(rectangles)
         image_good = draw_rectangle(rectangles, image_good)
         plt.subplot(1, 2, 1)
         plt.imshow(image_good)
@@ -63,6 +61,15 @@ def vizualise(folder):
         # plt.imshow(image_bad)
         # plt.title('Bad grasping rectangles')
         plt.show()
+
+
+def vizualise_all(X, Y):
+    for x, list_y in zip(X, Y):
+        for y in list_y:
+            draw_rectangle([grasp_to_bbox(y)], x)
+        plt.imshow(x)
+        plt.show()
+
 
 
 def zoom_on_data(viz=False):
@@ -116,7 +123,8 @@ def bboxes_to_grasps(box):
 def grasp_to_bbox(grasp):
     # x, y, tan, h, w = grasp
     #theta = np.arctan(tan)
-    x, y, theta, h, w = grasp
+    print(grasp)
+    x, y, theta, h, w = tuple(grasp)
     theta = theta * np.pi/180
     edge1 = [x - w/2*np.cos(theta) + h/2*np.sin(theta), y + w/2*np.sin(theta) + h/2*np.cos(theta)]
     edge2 = [x + w/2*np.cos(theta) + h/2*np.sin(theta), y - w/2*np.sin(theta) + h/2*np.cos(theta)]
@@ -126,7 +134,7 @@ def grasp_to_bbox(grasp):
 
 
 def create_preprocessing_data(path, split_percent=0.8, viz=False):
-    X_train, Y_train, X_test, Y_test = [], [], [], []
+    X_train, Y_train, X_test, Y_test, X_test_mse, Y_test_mse = [], [], [], [], [], []
     A = [file for file in os.listdir(path) if ('.png' in file)]
     for image_name in A:
         image = imread(path+'/'+image_name)
@@ -135,6 +143,7 @@ def create_preprocessing_data(path, split_percent=0.8, viz=False):
         grasp_points = f.readlines()
         y_temp = []
         trainORtest = np.random.random() < split_percent
+
         if trainORtest:                                     # Dans le cas où c'est dans le train ==> injection
             # for nb_grasp in range(len(grasp_points)//4):  # Si on ne veut pas être injectif
             for nb_grasp in range(1):  # Si on veut être injectif
@@ -153,7 +162,22 @@ def create_preprocessing_data(path, split_percent=0.8, viz=False):
                     ## We put in train set several couple (X,Y) for the same X
                     X_train.append(image)
                     Y_train.append(grasp_param)
+
         else:                                               # Sinon dans le test, on prend tous les rectangles possibles
+            ############### Dans le test MSE on n'en prend qu'un seul ###############
+            # for nb_grasp in range(1):  # Si on veut être injectif
+            #     box = []
+            #     for i in range(4):
+            #         temp_grasp = list(map(float, grasp_points[nb_grasp*4+i].split(" ")))
+            #         box.append(temp_grasp[0])
+            #         box.append(temp_grasp[1])
+            #     grasp_param = bboxes_to_grasps(box)
+            #     nan_check = [grasp == grasp for grasp in grasp_param]
+            #     if False not in nan_check:
+            #         ## We put in train set several couple (X,Y) for the same X
+            #         X_test_mse.append(image)
+            #         Y_test_mse.append(grasp_param)
+
             for nb_grasp in range(len(grasp_points)//4):
                 box = []
                 for i in range(4):
@@ -165,15 +189,96 @@ def create_preprocessing_data(path, split_percent=0.8, viz=False):
                 y_temp.append(grasp_param)
             X_test.append(image)
             Y_test.append(y_temp)
+
     return np.array(X_train), np.array(Y_train), np.array(X_test), np.array(Y_test)
 
 
-if __name__=="__main__":
-    zoom_on_data(viz=False)
-    # vizualise('processed_data')
+def all_data_on_test_format(path):
+    X, Y = [], []
+    A = [file for file in os.listdir(path) if ('.png' in file)]
+    for image_name in A:
+        image = imread(path + '/' + image_name)
+        number = image_name.rstrip('r.png')
+        f = open(path + '/' + number + 'cpos.txt')
+        grasp_points = f.readlines()
+        y_temp = []
 
-    X_train, Y_train, X_test, Y_test = create_preprocessing_data('processed_data')
-    np.save('prepared_data/X_train.npy', X_train)
-    np.save('prepared_data/Y_train.npy', Y_train)
-    np.save('prepared_data/X_test.npy', X_test)
-    np.save('prepared_data/Y_test.npy', Y_test)
+        for nb_grasp in range(len(grasp_points)//4):
+            box = []
+            for i in range(4):
+                temp_grasp = list(map(float, grasp_points[nb_grasp * 4 + i].split(" ")))
+                box.append(temp_grasp[0])
+                box.append(temp_grasp[1])
+            grasp_param = bboxes_to_grasps(box)
+            ## We put in test set one couple (X, [Y1,..,Yn])
+            y_temp.append(grasp_param)
+        X.append(image)
+        Y.append(y_temp)
+
+    return np.array(X), np.array(Y)
+
+
+def augmentation(X, Y):
+    new_X, new_Y = [], []
+    for x, y_list in zip(X, Y):
+        new_X.append(x)
+        new_Y.append(y_list)
+        fliplr_x = np.fliplr(np.copy(x))
+        y_temp = []
+        for y in y_list:
+            bb = np.array(grasp_to_bbox(y))
+            bb[:, 0] = 224 - bb[:, 0]
+            grasp = bboxes_to_grasps(bb.ravel())
+            y_temp.append(grasp)
+        new_X.append(fliplr_x)
+        new_Y.append(y_temp)
+        #####################################
+        ## Ajouter la luminosité plus tard ##
+        #####################################
+        flipud_x = np.flipud(np.copy(x))
+        y_temp = []
+        for y in y_list:
+            bb = np.array(grasp_to_bbox(y))
+            bb[:, 1] = 224 - bb[:, 1]
+            grasp = bboxes_to_grasps(bb.ravel())
+            y_temp.append(grasp)
+        new_X.append(flipud_x)
+        new_Y.append(y_temp)
+        #####################################
+        ## Ajouter la luminosité plus tard ##
+        #####################################
+        flipudlr_x = np.fliplr(np.flipud(np.copy(x)))
+        y_temp = []
+        for y in y_list:
+            bb = np.array(grasp_to_bbox(y))
+            bb[:, 0], bb[:, 1] = 224 - bb[:, 0], 224 - bb[:, 1]
+            grasp = bboxes_to_grasps(bb.ravel())
+            y_temp.append(grasp)
+        new_X.append(flipudlr_x)
+        new_Y.append(y_temp)
+
+    return np.array(new_X), np.array(new_Y)
+
+if __name__=="__main__":
+    # zoom_on_data(viz=False)
+    # # vizualise('processed_data')
+    # X, Y = all_data_on_test_format('processed_data')
+    X, Y = all_data_on_test_format('processed_data')
+    new_X, new_Y = augmentation(X, Y)
+    np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
+    np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
+    X, Y = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
+           np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
+    vizualise_all(X, Y)
+    # X_train, Y_train, X_test, Y_test = create_preprocessing_data('processed_data')
+    # np.save('prepared_data/X_train.npy', X_train)
+    # np.save('prepared_data/Y_train.npy', Y_train)
+    # np.save('prepared_data/X_test.npy', X_test)
+    # np.save('prepared_data/Y_test.npy', Y_test)
+    X, Y = all_data_on_test_format('processed_data')
+    # np.save('prepared_data/all_X_test_format.npy', X)
+    # np.save('prepared_data/all_Y_test_format.npy', Y)
+
+    new_X, new_Y = augmentation(X, Y)
+    np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
+    np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
