@@ -28,10 +28,13 @@ import pickle
 
 def process_data():
     # Loading the data
+    # X_test, Y_test = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
+    #                  np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
     X_test, Y_test = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
-                     np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
+           np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
+    # _, X_test, _, Y_test = train_test_split(X, Y, test_size = 0.33, random_state=42)
     # Loading the trained model
-    model_name = 'ADAM_bayesian'
+    model_name = 'ADAM_7'
     model = model_resnet()
     model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
     print('Taille du X : ', X_test.shape)
@@ -50,7 +53,7 @@ def process_data():
     for i in range(len(good_bad)):
         result_to_be_compared.append((X_test[i], X_traite[i], Y_test[i], loss[i], good_bad[i]))
     print(len(result_to_be_compared))
-    np.save('uncertainty/lossnet_data_aug.npy', np.array(result_to_be_compared))
+    np.save('uncertainty/lossnet_data_aug_{}.npy'.format(model_name), np.array(result_to_be_compared))
     return good_bad
 
 ########## CONFID NET ##########
@@ -68,7 +71,7 @@ def confidnet():
     model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='binary_crossentropy', metrics=['accuracy'])
     return model
 
-def train_and_save_confidnet(lossnet_data):
+def train_and_save_confidnet(lossnet_data, model_name):
     X, Y = lossnet_data[:, 1], lossnet_data[:, 4]
     X = np.array([np.array(x) for x in X])
     # X = X.reshape((X.shape[0], X.shape[1]))
@@ -92,7 +95,7 @@ def train_and_save_confidnet(lossnet_data):
     plt.legend()
     plt.show()
 
-    model_name = 'ConfidNet_aug_1'
+
     model_json = model.to_json()
     with open("saved_model/model_arch_{}.json".format(model_name), "w") as json_file:
         json_file.write(model_json)
@@ -105,24 +108,24 @@ def train_and_save_confidnet(lossnet_data):
 ########## LOSS NET ##########
 def lossnet():
     model = Sequential()
-    model.add(Dense(2048, kernel_regularizer=l2(0.01), activation='relu'))
-    model.add(Dropout(rate=0.3))
+    model.add(Dense(2048, activation='relu'))
+    # model.add(Dropout(rate=0.5))
     # model.add(Dense(1024, kernel_regularizer=l2(0.01), activation='relu'))
     # model.add(Dropout(rate=0.2))
-    model.add(Dense(512, kernel_regularizer=l2(0.01), activation='relu'))
-    model.add(Dropout(rate=0.3))
-    model.add(Dense(1, activation='linear'))
+    model.add(Dense(512, activation='relu'))
+    # model.add(Dropout(rate=0.3))  #, kernel_regularizer=l2(0.01)
+    model.add(Dense(1, activation='relu'))
     # model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.9), loss='mse')
     model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='mse')
     return model
 
 
-def train_and_save_lossnet(lossnet_data):
+def train_and_save_lossnet(lossnet_data, model_name):
     X, Y = lossnet_data[:, 1], lossnet_data[:, 3]
     X = np.array([np.array(x) for x in X])
     # X = X.reshape((X.shape[0], X.shape[1]))
 
-    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size = 0.33, random_state=42)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
     model = lossnet()
     reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.7,
                                   patience=10, min_lr=1e-12)
@@ -134,7 +137,6 @@ def train_and_save_lossnet(lossnet_data):
     plt.plot(history.history['val_loss'], label='test')
     plt.show()
 
-    model_name = 'lossNet_3'
     model_json = model.to_json()
     with open("saved_model/model_arch_{}.json".format(model_name), "w") as json_file:
         json_file.write(model_json)
@@ -171,7 +173,7 @@ if __name__=='__main__':
     # show_history('saved_model/history_ConfidNet_aug.obj')
     # good_bad = process_data()
     # np.save('uncertainty/good_bad_lossnet.npy', good_bad)
-    lossnet_data = np.load('uncertainty/lossnet_data_aug.npy', allow_pickle=True)
+    lossnet_data = np.load('uncertainty/lossnet_data_aug_ADAM_7.npy', allow_pickle=True)
 
-    train_and_save_lossnet(lossnet_data)
-    # train_and_save_confidnet(lossnet_data)
+    train_and_save_lossnet(lossnet_data, model_name='LossNet_3')
+    # train_and_save_confidnet(lossnet_data, model_name='ConfidNet_2)

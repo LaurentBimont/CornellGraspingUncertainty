@@ -32,7 +32,7 @@ def draw_rectangle(mes_rectangles, image):
 
 
 def vizualise(folder):
-    for i in range(100, 950):
+    for i in range(00, 950):
         image = imread(folder+'/pcd0{}r.png'.format(i))
         image_good, image_bad = np.copy(image), np.copy(image)
         f = open(folder+'/pcd0{}cpos.txt'.format(i))
@@ -75,14 +75,13 @@ def vizualise_all(X, Y):
 def zoom_on_data(viz=False):
     j = 0
     start_x, end_x, start_y, end_y = 124, 418, 144, 438
-    for k in range(2, 11):
+    for k in range(1, 2):
         for i in range(k*100, (k+1)*100):
             try:
-                image = imread('folder/0{}/pcd0{}r.png'.format(k, i))
+                image = imread('TestZone/folder0{}/pcd0{}r.png'.format(k, i))
                 image = image[start_x:end_x, start_y:end_y, :]
-                f = open('folder/0{}/pcd0{}cpos.txt'.format(k, i), 'r')
+                f = open('TestZone/folder0{}/pcd0{}cpos.txt'.format(k, i), 'r')
                 points = f.readlines()
-
                 old_shape = image.shape
                 image = cv2.resize(image, (224, 224))
                 new_shape = image.shape
@@ -95,10 +94,47 @@ def zoom_on_data(viz=False):
                     plt.imshow(image_good)
                     plt.title('Good grasping rectangles')
                     plt.show()
-                f = open('processed_data/pcd0{}cpos.txt'.format(j), 'w')
+                f = open('TestZone/processed_data/pcd0{}cpos.txt'.format(j), 'w')
                 f.writelines(points)
-                imsave('processed_data/pcd0{}r.png'.format(j), image)
+                imsave('TestZone/processed_data/pcd0{}r.png'.format(j), image)
                 j += 1
+            except:
+                pass
+
+
+def zoom_on_data_bis(viz=False):
+    j = 0
+    start_x, end_x, start_y, end_y = 154, 475, 61, 538
+    for k in range(1, 2):
+        for i in range(k*101, (k+1)*100):
+            try:
+                image = imread('TestZone/folder{}/pcd0{}r.png'.format(k, i))
+                image = image[start_x:end_x, start_y:end_y, :]
+                rect = bounding_box_detector(image, viz=viz)
+                if rect is not None:
+                    image = image[rect[1]:rect[1]+rect[3], rect[0]:rect[0]+rect[2]]
+                    f = open('TestZone/folder{}/pcd0{}cpos.txt'.format(k, i), 'r')
+                    points = f.readlines()
+                    old_shape = image.shape
+                    image = cv2.resize(image, (224, 224))
+                    new_shape = image.shape
+                    x_ratio, y_ratio = new_shape[0] / old_shape[0], new_shape[1] / old_shape[1]
+                    f.close()
+
+                    points = [str(x_ratio*(float(point.split(' ')[0])-start_y-rect[0]))+' '+str(x_ratio*(float(point.split(' ')[1])-start_x-rect[1]))+'\n' for point in points]
+
+                    print(True in ['nan' in pt for pt in points])
+                    if viz:
+                        rectangles = process(points)
+                        image_good = draw_rectangle(rectangles, image)
+                        plt.imshow(image_good)
+                        plt.title('Good grasping rectangles')
+                        plt.show()
+                    if not True in ['nan' in pt for pt in points]:
+                        f = open('TestZone/processed_data/pcd0{}cpos.txt'.format(j), 'w')
+                        f.writelines(points)
+                        imsave('TestZone/processed_data/pcd0{}r.png'.format(j), image)
+                        j += 1
             except:
                 pass
 
@@ -259,26 +295,114 @@ def augmentation(X, Y):
 
     return np.array(new_X), np.array(new_Y)
 
+def bounding_box_detector(image, viz=False):
+    # image = image[154:475, 61:538]
+    img_grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    thres, thresh_output = cv2.threshold(img_grey, 150, 255, cv2.THRESH_BINARY)
+    kernel = -np.ones((5, 5), np.uint8)
+    thresh_output = cv2.bitwise_not(thresh_output)
+    thresh_output = cv2.dilate(thresh_output, kernel, iterations=10)
+    thresh_output = cv2.bitwise_not(thresh_output)
+    cnts, hier = cv2.findContours(thresh_output, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    try:
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+        rect = list(cv2.boundingRect(cnts[1]))
+        L = max((rect[2:]))
+        rect[0] = max(int(rect[0] - L / 2 + rect[2] // 2), 0)
+        rect[1] = max(int(rect[1] - L / 2 + rect[3] // 2), 0)
+        rect[2] = rect[3] = L
+    except:
+        print('Error while finding the contour')
+        return None
+    if viz:
+        cv2.rectangle(image, tuple(rect), (0, 255, 0), 5)
+        plt.subplot(1, 2, 1)
+        plt.imshow(image)
+        plt.subplot(1, 2, 2)
+        plt.imshow(thresh_output)
+        plt.show()
+    return rect
+
+# def load_object_detector():
+#     cvNet = cv2.dnn.readNetFromTensorflow(
+#         'TestZone/Detection objet-20200203T100954Z-001/Detection objet/ssd_mobilenet_v1_coco_2017_11_17/frozen_inference_graph.pb',
+#         'TestZone/Detection objet-20200203T100954Z-001/Detection objet/ssd_mobilenet_v1_coco_2017_11_17.pbtxt')
+#     return cvNet
+#
+#
+# def object_detector(cvNet, img):
+#     plt.subplot(1, 2, 1)
+#     plt.imshow(img)
+#     # img = img[154:475, 61:538]
+#     rows = img.shape[0]
+#     cols = img.shape[1]
+#
+#     cvNet.setInput(cv2.dnn.blobFromImage(img, size=(rows, cols), swapRB=False, crop=False))
+#     cvOut = cvNet.forward()
+#
+#     Rect = []
+#     index = np.argmax(cvOut[0, 0, :, 2])
+#     for detection in cvOut[0, 0, :, :]:
+#         score = float(detection[2])
+#         if score > 0.3:
+#             left = (detection[3] * cols) - 50
+#             top = (detection[4] * rows) - 50
+#             right = (detection[5] * cols) + 50
+#             bottom = (detection[6] * rows) + 50
+#             Rect.append([int(left), int(top), int(right), int(bottom)])
+#             cv2.rectangle(img, (int(left), int(top)), (int(right), int(bottom)), (23, 230, 210), thickness=2)
+#
+#     plt.subplot(1, 2, 2)
+#     plt.imshow(img)
+#     plt.show()
+
 if __name__=="__main__":
     # zoom_on_data(viz=False)
-    # # vizualise('processed_data')
-    # X, Y = all_data_on_test_format('processed_data')
-    X, Y = all_data_on_test_format('processed_data')
-    new_X, new_Y = augmentation(X, Y)
-    np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
-    np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
-    X, Y = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
-           np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
-    vizualise_all(X, Y)
-    # X_train, Y_train, X_test, Y_test = create_preprocessing_data('processed_data')
-    # np.save('prepared_data/X_train.npy', X_train)
-    # np.save('prepared_data/Y_train.npy', Y_train)
-    # np.save('prepared_data/X_test.npy', X_test)
-    # np.save('prepared_data/Y_test.npy', Y_test)
-    X, Y = all_data_on_test_format('processed_data')
-    # np.save('prepared_data/all_X_test_format.npy', X)
-    # np.save('prepared_data/all_Y_test_format.npy', Y)
+    zoom_on_data_bis(viz=False)
 
-    new_X, new_Y = augmentation(X, Y)
-    np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
-    np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
+    vizualise('TestZone/processed_data')
+    # X, Y = all_data_on_test_format('processed_data')
+    ################ Create augmented data ###############
+    # X, Y = all_data_on_test_format('processed_data')
+    # new_X, new_Y = augmentation(X, Y)
+    # np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
+    # np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
+    # X, Y = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
+    #        np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
+    vizualise_all(X, Y)
+    # for i in range(101, 200):
+    #     X = imread('TestZone/folder1/pcd0{}r.png'.format(i))
+    #     my_object_detector = load_object_detector()
+    #     object_detector(my_object_detector, X)
+
+    ############ Using simple bounding box #############
+    import imutils
+
+    for i in range(101, 200):
+        image = cv2.imread('TestZone/folder1/pcd0{}r.png'.format(i))  # path = path to your file
+
+        image = image[154:475, 61:538]
+        img_grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        thres, thresh_output = cv2.threshold(img_grey, 150, 255, cv2.THRESH_BINARY)
+        kernel = -np.ones((5, 5), np.uint8)
+        thresh_output = cv2.bitwise_not(thresh_output)
+        thresh_output = cv2.dilate(thresh_output, kernel, iterations=10)
+        thresh_output = cv2.bitwise_not(thresh_output)
+        cnts, hier = cv2.findContours(thresh_output, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        # cv2.drawContours(image, cnts, -1, (0, 255, 0), 3)
+        # cnts = imutils.grab_contours(cnts)
+        cnts = sorted(cnts, key=cv2.contourArea, reverse=True)
+        rect = list(cv2.boundingRect(cnts[1]))
+        L= max((rect[2:]))
+        rect[0] = int(rect[0] - L/2 + rect[2]//2)
+        rect[1] = int(rect[1] - L/2 + rect[3]//2)
+        rect[2] = rect[3] = L
+        cv2.rectangle(image, tuple(rect), (0, 255, 0), 5)
+        plt.subplot(1, 2, 1)
+        plt.imshow(image)
+        plt.subplot(1, 2, 2)
+        plt.imshow(thresh_output)
+        plt.show()
+
+    # ############ Zoom on images thanks to YOLO ###########
+    # load_object_detector('ssd_mobilenet_v1_coco_2018_01_28')
