@@ -4,11 +4,11 @@ if __name__=="__main__":
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     # config.gpu_options.per_process_gpu_memory_fraction = 0.4
-
-    K.set_session(tf.Session(config=config))
+    tf.enable_eager_execution(config)
+    # K.set_session(tf.Session(config=config))
     # config = tf.ConfigProto()
     # config.gpu_options.allow_growth = True
-    # tf.enable_eager_execution(config)
+
 from tensorflow.python.keras.applications import ResNet50
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Input, Dense, Dropout
@@ -19,6 +19,7 @@ from tensorflow.keras.callbacks import LearningRateScheduler, ReduceLROnPlateau,
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import pickle
 
 # Common accuracy metric for all outputs, but can use different metrics for different output
 
@@ -41,6 +42,18 @@ X, Y = np.load('prepared_data/X_train.npy'), np.load('prepared_data/Y_train.npy'
 #     plt.show()
 #     print(small_Y[i])
 
+def probability_resnet_model():
+    model = Sequential()
+    # 1st layer as the lumpsum weights from resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5
+    # NOTE that this layer will be set below as NOT TRAINABLE, i.e., use it as is
+    model.add(ResNet50(include_top=False, pooling='avg', weights='imagenet'))
+    model.add(tfp.layers.DenseFlipout(1024, activation=tf.nn.relu))
+    model.add(Dropout(rate=0.2))
+    model.add(tfp.layers.DenseFlipout(512, activation=tf.nn.relu))
+    model.add(Dropout(rate=0.2))
+    model.add(tfp.layers.DenseFlipout(5, activation=tf.nn.linear))
+    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss=min_mse)
+
 
 def resnet_model():
     model = Sequential()
@@ -57,8 +70,14 @@ def resnet_model():
     model.layers[0].trainable = False
 
     # model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.00001, decay=1e-6, momentum=0.9), loss='mse')
-    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='mse')
+    # model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='mse')
+    model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss=min_mse)
     return model
+
+
+def min_mse(y_true, y_pred):
+    y_pred_temp = K.repeat(y_pred, K.shape(y_true)[1])
+    return K.sqrt(K.min(K.mean(K.square(y_pred_temp - y_true), axis=-1), axis=-1))
 
 
 def resnet_alone():
@@ -78,7 +97,7 @@ def model_resnet(bayesian=False):
     x = Dropout(0.2)(x, training=bayesian)
     x = Dense(5, activation='linear')(x)
     model = Model(inputs, x)
-    model.layers[1].trainable = False
+    # model.layers[1].trainable = False
     # model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.00001, decay=1e-6, momentum=0.9), loss='mse')
     model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='mse')
     return model
@@ -90,29 +109,40 @@ if __name__=="__main__":
 
     X, Y = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
            np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
-    Y = np.array([np.array(y[0]) for y in Y])
-    print(Y)
-    # model = model_resnet()
-    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size = 0.33, random_state=42)
 
+    # Y = np.array([np.array(y[0]) for y in Y])
+    Y = np.array([np.array(y) for y in Y])
+    Y_max = max([y.shape[0] for y in Y])
+
+    Y_temp = 1000 * np.ones((Y.shape[0], Y_max, 5))
+    for i in range(Y_temp.shape[0]):
+        Y_temp[i, :Y[i].shape[0], :] = Y[i]
+
+    Y = Y_temp
+    # print(np.isnan(Y).any())
+    # model = model_resnet()
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
+    print(Y_train.shape, Y_test.shape, X_train.shape)
     model = resnet_model()
+    model.summary()
     ## Callbacks
     lr = LearningRateScheduler(lr_scheduler)
     # cback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
     #             filepath="saved_model/poids_ADAM_test.h5",
     #             verbose=1
     #         )
-    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5,
+    reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.5,
                                 patience=5, min_lr=1e-12)
-    es = EarlyStopping(monitor='loss', mode='min', verbose=1, patience=100)
+    es = EarlyStopping(monitor='loss', mode='min', verbose=1, patience=20)
     callbacks_list = [lr]#, cback_checkpoint]
     callbacks_list = [reduce_lr, es]
-    history = model.fit(X_train, Y_train, validation_data=(X_test, Y_test), verbose=1, batch_size=25, epochs=3000, callbacks=callbacks_list, shuffle=True)
+    history = model.fit(X_train, Y_train, validation_data=(X_test, Y_test), verbose=1, batch_size=1, epochs=3000,
+                        callbacks=callbacks_list, shuffle=True)
 
     plt.plot(history.history['loss'])
     plt.show()
 
-    model_name = 'ADAM_7'
+    model_name = 'ADAM_9_(new_loss)'
     model_json = model.to_json()
     with open("saved_model/model_arch_{}.json".format(model_name), "w") as json_file:
         json_file.write(model_json)

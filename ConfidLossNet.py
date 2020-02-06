@@ -15,7 +15,7 @@ from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.layers import Input, Dense, Dropout
 from tensorflow.keras.models import Model
 
-from tensorflow.keras.callbacks import LearningRateScheduler, ReduceLROnPlateau, EarlyStopping
+from tensorflow.keras.callbacks import LearningRateScheduler, ReduceLROnPlateau, EarlyStopping, ModelCheckpoint
 from tensorflow.keras.regularizers import l2
 
 import numpy as np
@@ -26,111 +26,124 @@ from model import model_resnet, resnet_alone
 from sklearn.model_selection import train_test_split
 import pickle
 
-def process_data():
+def process_data(model_name):
     # Loading the data
     # X_test, Y_test = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
     #                  np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
-    X_test, Y_test = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
+    X, Y = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
            np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
-    # _, X_test, _, Y_test = train_test_split(X, Y, test_size = 0.33, random_state=42)
+
     # Loading the trained model
-    model_name = 'ADAM_7'
     model = model_resnet()
     model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
-    print('Taille du X : ', X_test.shape)
+    print('Taille du X : ', X.shape)
     model_resnet_alone = resnet_alone()
-    Y_pred = model.predict(X_test)
-    X_traite = model_resnet_alone.predict(X_test)
-    good_bad = make_classification(Y_pred, Y_test)
-    loss = make_mse_comparizon(Y_pred, Y_test)
+    Y_pred = model.predict(X)
+    X_traite = model_resnet_alone.predict(X)
+    good_bad = make_classification(Y_pred, Y)
+    loss = make_mse_comparizon(Y_pred, Y)
 
-    print(len(make_classification(Y_pred, Y_test)))
-    print(len(make_mse_comparizon(Y_pred, Y_test)))
-    print(compute_performance(model, X_test, Y_test, viz=False))
+    print(len(make_classification(Y_pred, Y)))
+    print(len(make_mse_comparizon(Y_pred, Y)))
+    print(compute_performance(model, X, Y, viz=False))
     print(Y_pred.shape, X_traite.shape)
 
     result_to_be_compared = []
     for i in range(len(good_bad)):
-        result_to_be_compared.append((X_test[i], X_traite[i], Y_test[i], loss[i], good_bad[i]))
+        result_to_be_compared.append((X[i], X_traite[i], Y[i], loss[i], good_bad[i]))
     print(len(result_to_be_compared))
     np.save('uncertainty/lossnet_data_aug_{}.npy'.format(model_name), np.array(result_to_be_compared))
     return good_bad
 
-########## CONFID NET ##########
 
-def confidnet():
+########## CONFID NET ##########
+def confidnet(Restrainable=False):
     model = Sequential()
-    model.add(Dense(1024, kernel_regularizer=l2(0.01), activation='relu'))
-    # model.add(Dropout(rate=0.2))
-    # model.add(Dense(1024, kernel_regularizer=l2(0.01), activation='relu'))
+    if Restrainable:
+        model.add(ResNet50(include_top=False, pooling='avg', weights='imagenet'))
+    model.add(Dense(2048, kernel_regularizer=l2(0.05), activation='relu'))
+    model.add(Dropout(rate=0.2))
+    model.add(Dense(1024, kernel_regularizer=l2(0.05), activation='relu'))
     model.add(Dropout(rate=0.3))
-    model.add(Dense(512, kernel_regularizer=l2(0.01), activation='relu'))
+    model.add(Dense(512, kernel_regularizer=l2(0.05), activation='relu'))
     model.add(Dropout(rate=0.2))
     model.add(Dense(1, activation='sigmoid'))
     # model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.00001, decay=1e-6, momentum=0.9), loss='mse')
     model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='binary_crossentropy', metrics=['accuracy'])
     return model
 
-def train_and_save_confidnet(lossnet_data, model_name):
-    X, Y = lossnet_data[:, 1], lossnet_data[:, 4]
+def train_and_save_confidnet(lossnet_data, model_name, Restrainable):
+    if not Restrainable:
+        X, Y = lossnet_data[:, 1], lossnet_data[:, 4]
+    else:
+        X, Y = lossnet_data[:, 0], lossnet_data[:, 4]
     X = np.array([np.array(x) for x in X])
+
     # X = X.reshape((X.shape[0], X.shape[1]))
 
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
-    model = confidnet()
-    reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.9,
-                                  patience=50, min_lr=1e-12)
-    es = EarlyStopping(monitor='val_loss', mode='min', verbose=0, patience=100)
-    callbacks_list = [reduce_lr, es]
-    history = model.fit(X_train, Y_train, batch_size=32, epochs=1000, callbacks=callbacks_list, validation_data=(X_test, Y_test),)
-    plt.subplot(1, 2 , 1)
+    model = confidnet(Restrainable=Restrainable)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', verbose=1, factor=0.9,
+                                  patience=5, min_lr=1e-12)
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=0, patience=10)
+    mc = ModelCheckpoint('saved_model/my_model_weights__{}.h5'.format(model_name), monitor='val_acc', verbose=1,
+                         save_best_only=True,
+                         save_weights_only=True, mode='auto', period=1)
+    callbacks_list = [reduce_lr, es, mc]
+    history = model.fit(X_train, Y_train, batch_size=32, epochs=1000, callbacks=callbacks_list, validation_data=(X_test,
+                                                                                                                 Y_test))
+    plt.subplot(1, 3, 1)
     plt.plot(history.history['loss'], label='train')
     plt.plot(history.history['val_loss'], label='test')
     plt.title('Loss evolution')
     plt.legend()
-    plt.subplot(1, 2, 2)
+    plt.subplot(1, 3, 2)
     plt.title('Accuracy evolution')
-    plt.plot(history.history['accuracy'], label='train')
-    plt.plot(history.history['val_accuracy'], label='test')
+    plt.plot(history.history['acc'], label='train')
+    plt.plot(history.history['val_acc'], label='test')
     plt.legend()
+    plt.subplot(1, 3, 3)
+    plt.plot(history.history['lr'], label='learning rate evolution')
     plt.show()
-
-
     model_json = model.to_json()
+
     with open("saved_model/model_arch_{}.json".format(model_name), "w") as json_file:
         json_file.write(model_json)
 
-    model.save_weights("saved_model/my_model_weights_{}.h5".format(model_name))
+    # model.save_weights("saved_model/my_model_weights_{}.h5".format(model_name))
     with open('saved_model/history_{}'.format(model_name), 'wb') as file_pi:
         pickle.dump(history.history, file_pi)
 
 
 ########## LOSS NET ##########
-def lossnet():
+def lossnet(Restrainable=False):
     model = Sequential()
+    if Restrainable:
+        model.add(ResNet50(include_top=False, pooling='avg', weights='imagenet'))
     model.add(Dense(2048, activation='relu'))
-    # model.add(Dropout(rate=0.5))
+    model.add(Dropout(rate=0.2))
     # model.add(Dense(1024, kernel_regularizer=l2(0.01), activation='relu'))
     # model.add(Dropout(rate=0.2))
     model.add(Dense(512, activation='relu'))
-    # model.add(Dropout(rate=0.3))  #, kernel_regularizer=l2(0.01)
-    model.add(Dense(1, activation='relu'))
+    model.add(Dropout(rate=0.2))  #, kernel_regularizer=l2(0.01)
+    model.add(Dense(1, activation='linear'))
     # model.compile(optimizer=tf.keras.optimizers.SGD(lr=0.0001, decay=1e-6, momentum=0.9), loss='mse')
     model.compile(optimizer=tf.keras.optimizers.Adam(lr=0.001), loss='mse')
     return model
-
 
 def train_and_save_lossnet(lossnet_data, model_name):
     X, Y = lossnet_data[:, 1], lossnet_data[:, 3]
     X = np.array([np.array(x) for x in X])
     # X = X.reshape((X.shape[0], X.shape[1]))
 
-    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+    X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
     model = lossnet()
-    reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.7,
-                                  patience=10, min_lr=1e-12)
-    es = EarlyStopping(monitor='loss', mode='min', verbose=0, patience=90)
-    callbacks_list = [reduce_lr, es]
+    reduce_lr = ReduceLROnPlateau(monitor='loss', factor=0.9,
+                                  patience=5, min_lr=1e-12)
+    es = EarlyStopping(monitor='val_loss', mode='min', verbose=0, patience=90)
+    mc = ModelCheckpoint('saved_model/checkpoint_{}'.format(model_name), monitor='val_loss', verbose=1, save_best_only=True,
+                                              save_weights_only=True, mode='auto', period=1)
+    callbacks_list = [reduce_lr, es, mc]
 
     history = model.fit(X_train, Y_train, batch_size=10, epochs=1000, callbacks=callbacks_list, validation_data=(X_test, Y_test))
     plt.plot(history.history['loss'], label='train')
@@ -173,7 +186,9 @@ if __name__=='__main__':
     # show_history('saved_model/history_ConfidNet_aug.obj')
     # good_bad = process_data()
     # np.save('uncertainty/good_bad_lossnet.npy', good_bad)
-    lossnet_data = np.load('uncertainty/lossnet_data_aug_ADAM_7.npy', allow_pickle=True)
+    # process_data(model_name='ADAM_8')
+    lossnet_data = np.load('uncertainty/lossnet_data_aug_ADAM_8.npy', allow_pickle=True)
 
-    train_and_save_lossnet(lossnet_data, model_name='LossNet_3')
-    # train_and_save_confidnet(lossnet_data, model_name='ConfidNet_2)
+    train_and_save_lossnet(lossnet_data, model_name='LossNet_4')
+    # train_and_save_confidnet(lossnet_data, model_name='ConfidNet_5', Restrainable=True)
+    show_history('saved_model/history_ConfidNet_5')

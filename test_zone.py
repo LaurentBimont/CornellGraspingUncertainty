@@ -1,23 +1,27 @@
+import tensorflow as tf
+import tensorflow.keras.backend as K
+config = tf.ConfigProto()
+config.gpu_options.allow_growth = True
+
+K.set_session(tf.Session(config=config))
+
+
+from tensorflow.python.keras.applications import ResNet50
+from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.layers import Dense, Dropout
+
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+import tensorflow_probability as tfp
 
-fig, ax = plt.subplots()
-xdata, ydata = [], []
-ln, = plt.plot([], [], 'ro')
 
-def init():
-    ax.set_xlim(0, 2*np.pi)
-    ax.set_ylim(-1, 1)
-    return ln,
+model = tf.keras.Sequential([
+    tfp.layers.DenseFlipout(512, activation=tf.nn.relu),
+    tfp.layers.DenseFlipout(10),
+])
 
-def update(frame):
-    xdata.append(frame)
-    ydata.append(np.sin(frame))
-    ln.set_data(xdata, ydata)
-    return ln,
-
-ani = FuncAnimation(fig, update, frames=np.linspace(0, 2*np.pi, 128),
-                    init_func=init, blit=True)
-ani.save('dd.mp4')
-plt.show()
+logits = model(features)
+neg_log_likelihood = tf.nn.softmax_cross_entropy_with_logits(
+    labels=labels, logits=logits)
+kl = sum(model.losses)
+loss = neg_log_likelihood + kl
+train_op = tf.train.AdamOptimizer().minimize(loss)

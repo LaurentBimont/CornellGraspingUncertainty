@@ -55,11 +55,7 @@ def vizualize_pred(image_entree, y_true, y_pred):
     # np.save('true_rectangle.npy', grasp_true)
 
 def performance(Y_pred, Y_true):
-    '''
-    :param grasp_pred: [[[x0,y0],[x0,y0]],...[]]
-    :param grasp_true:
-    :return:
-    '''
+
     grasp_pred = grasp_to_bbox(Y_pred)
     grasp_true = grasp_to_bbox(Y_true)
 
@@ -73,7 +69,7 @@ def performance(Y_pred, Y_true):
     # if iou > 0.25 and np.abs(tan_pred-tan_true) < 30:
     #     print(iou, np.abs(tan_pred - tan_true), True)
     theta_pred, theta_true = Y_pred[2], Y_true[2]
-    if iou > 0.25 and np.abs(theta_pred-theta_true) < 30:
+    if iou > 0.25 and (np.abs(theta_pred-theta_true) < 30 or np.abs(theta_pred % 180-theta_true % 180)):
         # print(iou, np.abs(theta_pred-theta_true), True)
         return True
     else:
@@ -104,6 +100,6 @@ if __name__=="__main__":
            np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
 
     X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.33, random_state=42)
-    model_name = 'ADAM_7'
+    model_name = 'ADAM_8'
     model = load_my_model('saved_model/model_arch_{}.json'.format(model_name), 'saved_model/my_model_weights_{}.h5'.format(model_name))
     print(compute_performance(model, X_test, Y_test, viz=False))

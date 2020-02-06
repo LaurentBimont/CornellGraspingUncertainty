@@ -20,7 +20,6 @@ def make_mse_comparizon(Y_pred, Y_test):
             mse = mean_squared_error(np.array(y), Y_pred[x])
             diff_mse.append(mse)
         MSE.append(min(diff_mse))
-
     return np.array(MSE)
 
 
@@ -48,7 +47,7 @@ if __name__=='__main__':
     model_name = 'ADAM_7'
     model = model_resnet(bayesian=True)
     model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
-
+    print(X_test.shape, X_test.dtype, type(X_test))
     # model = load_my_model('saved_model/model_arch_{}.json'.format(model_name), 'saved_model/my_model_weights_{}.h5'.format(model_name))
     f = K.function([model.layers[0].input, K.learning_phase()], [model.layers[-1].output])
 

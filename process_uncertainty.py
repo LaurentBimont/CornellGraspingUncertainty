@@ -1,5 +1,6 @@
 from ConfidLossNet import lossnet, confidnet
 from MCD_uncertainty import make_classification
+from model import model_resnet, resnet_model
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import pearsonr
@@ -9,6 +10,23 @@ from sklearn.metrics import auc
 import matplotlib.animation as animation
 import matplotlib.ticker as mtick
 from sklearn.model_selection import train_test_split
+
+from tqdm import tqdm
+import time
+
+import tensorflow as tf
+import tensorflow.keras.backend as K
+from tensorflow.keras.models import model_from_json
+
+if __name__ == "__main__":
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    # config.gpu_options.per_process_gpu_memory_fraction = 0.4
+
+    K.set_session(tf.Session(config=config))
+    # config = tf.ConfigProto()
+    # config.gpu_options.allow_growth = True
+    # tf.enable_eager_execution(config)
 
 
 def ROC_curve(good_Y, bad_Y, viz=False):
@@ -27,8 +45,17 @@ def ROC_curve(good_Y, bad_Y, viz=False):
     return X, Y, Y_1
 
 
-def plot_uncertainty_result(good_Y, bad_Y, viz=True, thresh=None):
-    f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+def plot_uncertainty_result(good_Y, bad_Y, viz=True, thresh=None, reg=None):
+    if reg is None:
+        f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+    else:
+        f, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(20, 6))
+        ax4.scatter(good_Y, reg[0], color='green')
+        ax4.scatter(bad_Y, reg[1], color='red')
+        ax4.set_xlabel('True Value')
+        ax4.set_ylabel('Predicted Value')
+        ax4.set_title('MSE prediction repartion\n Pearson coef {}'.format(round(100*reg[2][0])/100))
+
     unc_max = max(np.concatenate((bad_Y, good_Y)))
     bins = np.linspace(0, unc_max, 20)
     if thresh is None:
@@ -149,20 +176,49 @@ def make_film(good_Y, bad_Y):
 
 
 ######## Plot #######
+def plot_bayesian(lossnet_data, model_name, recompute=True):
+    X, res = lossnet_data[:, 0], lossnet_data[:, 4]
+    X = np.array([np.array(x) for x in X])
+
+    _, X_test, _, res = train_test_split(X, res, test_size=0.33, random_state=42)
+
+    if recompute:
+        model = model_resnet(bayesian=True)
+        model.fit(np.random.random((100, 224, 224, 3)), np.random.random((100, 5)))
+        model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
+
+        # model = load_my_model('saved_model/model_arch_{}.json'.format(model_name), 'saved_model/my_model_weights_{}.h5'.format(model_name))
+        f = K.function([model.layers[0].input, K.learning_phase()], [model.layers[-1].output])
+
+        X_test = X_test.astype(np.uint8)
+        T_bayesian_draw = []
+        for i in tqdm(range(X_test.shape[0]//20+1)):
+            print((i+1)*20, X_test.shape[0])
+            temp = np.array([f((X_test[i*20:min((i+1)*20, X_test.shape[0])], 1))[0] for i in range(10)])
+            lala = temp.var(axis=0).mean(axis=1)
+            T_bayesian_draw.extend(lala)
+
+        mean_var = np.array(T_bayesian_draw)
+
+        np.save('uncertainty/mean_var_ADAM8.npy', mean_var)
+    else:
+        mean_var = np.load('uncertainty/mean_var_ADAM8.npy')
+
+    good_pred = np.where(res == 1)
+    bad_pred = np.where(res == 0)
+    print(len(res), X_test.shape)
+    good_Y = mean_var[good_pred]
+    bad_Y = mean_var[bad_pred]
+
+    plot_uncertainty_result(good_Y, bad_Y)
+
+
 def plot_bayesian_uncertainty(MSE, T_bayesian_draw, result_test):
 
     good_pred = np.where(result_test == 1)
     bad_pred = np.where(result_test == 0)
 
     mean_var = T_bayesian_draw[:, :, :2].var(axis=0).mean(axis=1)
-    #
-    # plt.scatter(MSE[good_pred], mean_var[good_pred], color='g')
-    # plt.scatter(MSE[bad_pred], mean_var[bad_pred], color='r')
-    #
-    # plt.xlabel('Mean Squared Error')
-    # plt.ylabel('Variance')
-    # plt.title('Corrélation entre MSE et variance (Pearson coefficient : {})'.format(round(100*pearsonr(MSE, mean_var)[0])/100))
-    # plt.show()
 
     plt.subplot(1, 2, 1)
     bins = [10, 20, 30, 40, 50, 60, 70, 80, 90]
@@ -217,12 +273,24 @@ def plot_bayesian_uncertainty(MSE, T_bayesian_draw, result_test):
     plt.show()
 
 
-def plot_lossnet(X_test, MSE, result_test):
-    _, X_test, _, _ = train_test_split(X_test, MSE, test_size=0.33, random_state=42)
+def plot_lossnet(lossnet_data, model_name, Restrainable=False):
+
+    if not Restrainable:
+        X, MSE, result_test = lossnet_data[:, 1], lossnet_data[:, 3], lossnet_data[:, 4]
+        X = np.array([np.array(x) for x in X])
+    else:
+        X, MSE, result_test = lossnet_data[:, 1], lossnet_data[:, 3], lossnet_data[:, 4]
+        X = np.array([np.array(x) for x in X])
+
+    _, X_test, _, _ = train_test_split(X, MSE, test_size=0.33, random_state=42)
     _, MSE, _, result_test = train_test_split(MSE, result_test, test_size=0.33, random_state=42)
-    model_name = 'lossNet_1'
-    model = lossnet()
-    model.fit(X_test, MSE, batch_size=100, epochs=1)
+
+    # model = lossnet()
+    # model.fit(X_test, MSE, batch_size=100, epochs=1)
+    json_file = open('saved_model/model_arch_{}.json'.format(model_name), 'r')
+    loaded_model_json = json_file.read()
+    json_file.close()
+    model = model_from_json(loaded_model_json)
 
     model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
     MSE_pred = model.predict(X_test)
@@ -230,24 +298,37 @@ def plot_lossnet(X_test, MSE, result_test):
     bad_pred = np.where(result_test == 0)
 
     good_Y, bad_Y = (np.array([MSE_pred[good_pred].squeeze()]))[0], (np.array([MSE_pred[bad_pred].squeeze()]))[0]
+    pearson_coef = pearsonr(MSE, MSE_pred.reshape((-1)))
+    plot_uncertainty_result(good_Y, bad_Y, reg=[np.array(MSE[good_pred]), np.array(MSE[bad_pred]), pearson_coef])
 
-    plot_uncertainty_result(good_Y, bad_Y)
+    plt.savefig('{}.png'.format(model_name), dpi=600)
 
 
-def plot_confidnet(X_test, res, result_test):
-    _, X_test, _, _ = train_test_split(X_test, res, test_size=0.33, random_state=42)
-    _, res, _, result_test = train_test_split(res, result_test, test_size=0.33, random_state=42)
-    model_name = 'ConfidNet_aug'
-    model = confidnet()
-    model.fit(X_test, res, batch_size=100, epochs=1)
-    model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
+
+def plot_confidnet(lossnet_data, model_name, Restrainable=False):
+    if not Restrainable:
+        X, res = lossnet_data[:, 1], lossnet_data[:, 4]
+        X = np.array([np.array(x) for x in X])
+    else:
+        X, res = lossnet_data[:, 0], lossnet_data[:, 4]
+        X = np.array([np.array(x) for x in X])
+
+    _, X_test, _, res = train_test_split(X, res, test_size=0.33, random_state=42)
+
+    # model = confidnet(Restrainable=Restrainable)
+    # model.fit(X_test[:1], res[:1], batch_size=1, epochs=1)
+    json_file = open('saved_model/model_arch_{}.json'.format(model_name), 'r')
+    loaded_model_json = json_file.read()
+    json_file.close()
+    model = model_from_json(loaded_model_json)
+    model.load_weights('saved_model/checkpoint_{}.h5'.format(model_name))
+    # model.load_weights('saved_model/my_model_weights_{}.h5'.format(model_name))
     Y_pred = model.predict(X_test)
-    good_pred = np.where(result_test == 1)
-    bad_pred = np.where(result_test == 0)
+    good_pred = np.where(res == 1)
+    bad_pred = np.where(res == 0)
     # print(good_pred, bad_pred, Y_pred[bad_pred], len(result_test))
 
     good_Y, bad_Y = (1-np.array([Y_pred[good_pred].squeeze()]))[0], (1-np.array([Y_pred[bad_pred].squeeze()]))[0]
-
 
     # make_film(good_Y, bad_Y)
     # ROC_curve(good_Y, bad_Y)
@@ -256,26 +337,23 @@ def plot_confidnet(X_test, res, result_test):
 
 
 if __name__=='__main__':
-    MSE, mean_var, T_bayesian_draw = np.load('uncertainty/mse.npy'), np.load('uncertainty/mean_var.npy'), np.load('uncertainty/T_bayesian_draw.npy')
-    result_test = np.load('uncertainty/result_test.npy')
+    # MSE, mean_var, T_bayesian_draw = np.load('uncertainty/mse.npy'), np.load('uncertainty/mean_var.npy'), np.load('uncertainty/T_bayesian_draw.npy')
+    # result_test = np.load('uncertainty/result_test.npy')
     # plot_bayesian_uncertainty(MSE, T_bayesian_draw, result_test)
 
     result_test = np.load('uncertainty/good_bad_lossnet.npy')
-    X_train, Y_train, X_test, Y_test = np.load('prepared_data/X_train.npy', allow_pickle=True), \
-                                       np.load('prepared_data/Y_train.npy', allow_pickle=True), \
-                                       np.load('prepared_data/X_test.npy', allow_pickle=True), \
-                                       np.load('prepared_data/Y_test.npy', allow_pickle=True)
+    # X_train, Y_train, X_test, Y_test = np.load('prepared_data/X_train.npy', allow_pickle=True), \
+    #                                    np.load('prepared_data/Y_train.npy', allow_pickle=True), \
+    #                                    np.load('prepared_data/X_test.npy', allow_pickle=True), \
+    #                                    np.load('prepared_data/Y_test.npy', allow_pickle=True)
 
-    lossnet_data = np.load('uncertainty/lossnet_data_1.npy', allow_pickle=True)
-    print('taille du bordel', lossnet_data.shape)
-    X, MSE, res = lossnet_data[:, 1], lossnet_data[:, 3], lossnet_data[:, 4]
-    X = np.array([np.array(x) for x in X])
-    print('Taille du X', X.shape)
+    lossnet_data = np.load('uncertainty/lossnet_data_aug_ADAM_8.npy', allow_pickle=True)
 
-    plot_lossnet(X, MSE, res)
+    ######## Bayesian Net
+    # plot_bayesian(lossnet_data, model_name='ADAM_8', recompute=False)
+    #
+    # ######## Loss Net ##########
+    # plot_lossnet(lossnet_data, model_name='LossNet_4', Restrainable=False)
 
     ######## Confid Net ########
-    X, res = lossnet_data[:, 1], lossnet_data[:, 4]
-    X = np.array([np.array(x) for x in X])
-
-    plot_confidnet(X, res, res)
+    plot_confidnet(lossnet_data, model_name='ConfidNet_4', Restrainable=False)
