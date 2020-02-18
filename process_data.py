@@ -4,6 +4,8 @@ from scipy.misc import imread, imsave
 import os
 import cv2
 import sys
+import tqdm
+
 
 def process(points):
     '''
@@ -103,6 +105,37 @@ def zoom_on_data(viz=False):
                 pass
 
 
+def vizualize_jacquard():
+    j = 0
+    for i in tqdm.tqdm(range(12)):
+        print(i)
+        for dir_name in tqdm.tqdm(os.listdir('Jacquard/Jacquard_Dataset_{}'.format(i))):
+            for k in range(0, 5):
+                try:
+                    image = imread('Jacquard/Jacquard_Dataset_{}/{}/{}_{}_RGB.png'.format(i, dir_name, k, dir_name))
+                    # image = image[start_x:end_x, start_y:end_y, :]
+                    f = open('Jacquard/Jacquard_Dataset_{}/{}/{}_{}_grasps.txt'.format(i, dir_name, k, dir_name), 'r')
+                    points = f.readlines()
+                    old_shape = image.shape
+                    image = cv2.resize(image, (224, 224))
+                    new_shape = image.shape
+                    x_ratio, y_ratio = new_shape[0] / old_shape[0], new_shape[1] / old_shape[1]
+                    points = [str(x_ratio * (float(point.split(';')[0]))) + ' ' +
+                              str(x_ratio * (float(point.split(';')[1]))) + ' ' +
+                              str(float(point.split(';')[2])) + ' ' +
+                              str(x_ratio * float(point.split(';')[3])) + ' ' +
+                              str(x_ratio * float(point.split(';')[4]))
+                              + '\n' for point in points]
+                    f.close()
+                    f = open('processed_data_jacquard/pcd0{}cpos.txt'.format(j), 'w')
+                    f.writelines(points)
+                    imsave('processed_data_jacquard/pcd0{}r.png'.format(j), image)
+                    j += 1
+                except:
+                    pass
+                    # print('{}_{}_RGB.png does not exist'.format(k, dir_name))
+
+
 def zoom_on_data_bis(viz=False):
     j = 0
     start_x, end_x, start_y, end_y = 154, 475, 61, 538
@@ -160,6 +193,7 @@ def bboxes_to_grasps(box):
 def grasp_to_bbox(grasp):
     # x, y, tan, h, w = grasp
     #theta = np.arctan(tan)
+    print(grasp)
     x, y, theta, h, w = tuple(grasp)
     theta = theta * np.pi/180
     edge1 = [x - w/2*np.cos(theta) + h/2*np.sin(theta), y + w/2*np.sin(theta) + h/2*np.cos(theta)]
@@ -295,6 +329,7 @@ def augmentation(X, Y):
 
     return np.array(new_X), np.array(new_Y)
 
+
 def bounding_box_detector(image, viz=False):
     # image = image[154:475, 61:538]
     img_grey = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -324,16 +359,26 @@ def bounding_box_detector(image, viz=False):
     return rect
 
 
+# def create_data_format_from_jacquard(folder):
+
+
 if __name__=="__main__":
+    vizualize_jacquard()
+
+    X, Y = all_data_on_test_format('processed_data_jacquard')
+    np.save('prepared_data/all_X_jacquard_augmented_test_format.npy', X)
+    np.save('prepared_data/all_Y_jacquard_augmented_test_format.npy', Y)
+    pass
+
     # zoom_on_data_bis(viz=False)
 
     # vizualise('processed_data')
     # X, Y = all_data_on_test_format('processed_data')
     ################ Create augmented data ###############
-    X, Y = all_data_on_test_format('processed_data')
-    new_X, new_Y = augmentation(X, Y)
-    np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
-    np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
+    # X, Y = all_data_on_test_format('processed_data')
+    # new_X, new_Y = augmentation(X, Y)
+    # np.save('prepared_data/all_X_augmented_test_format.npy', new_X)
+    # np.save('prepared_data/all_Y_augmented_test_format.npy', new_Y)
     # X, Y = np.load('prepared_data/all_X_augmented_test_format.npy', allow_pickle=True),\
     #        np.load('prepared_data/all_Y_augmented_test_format.npy', allow_pickle=True)
     # vizualise_all(X, Y)

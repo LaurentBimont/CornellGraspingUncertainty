@@ -14,14 +14,21 @@ import numpy as np
 import tensorflow_probability as tfp
 
 
-model = tf.keras.Sequential([
-    tfp.layers.DenseFlipout(512, activation=tf.nn.relu),
-    tfp.layers.DenseFlipout(10),
-])
+def neg_log_likelihood(y_true, y_pred):
+    my_mean = y_pred[:, :5]
+    my_var = y_pred[:, 5:]
+    my_mean_temp = K.repeat(my_mean, K.shape(y_true)[1])
+    my_var = (K.log(1 + K.exp(my_var)))
+    # return K.mean(K.log(K.square(my_var))/2 + K.min(K.square(my_mean_temp-y_true), axis=1)/(2*K.square(my_var))) +\
+    #        0.5*K.log(2*np.pi)
+    # return K.mean(K.log(K.square(my_var))/2 + K.min(K.square(my_mean_temp-y_true), axis=1)/(2*K.square(my_var))) + 0.5*K.log(2*np.pi)   K.min(K.square(my_mean_temp-y_true), axis=1)/
+    numerateur = K.min(K.square(my_mean_temp - y_true), axis=1)
+    denominateur = 2 * K.square(my_var + 1e-5)
+    print(K.get_value(numerateur), K.get_value(denominateur))
+    print(K.get_value(numerateur/denominateur))
+    return K.mean(numerateur/denominateur)
 
-logits = model(features)
-neg_log_likelihood = tf.nn.softmax_cross_entropy_with_logits(
-    labels=labels, logits=logits)
-kl = sum(model.losses)
-loss = neg_log_likelihood + kl
-train_op = tf.train.AdamOptimizer().minimize(loss)
+y_true = -1*tf.random.uniform((100, 20, 5))
+y_pred = 10000*tf.ones((100, 10))
+
+print(K.get_value(neg_log_likelihood(y_true, y_pred)))
